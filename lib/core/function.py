@@ -21,6 +21,7 @@ from utils.utils import get_confusion_matrix
 from utils.utils import adjust_learning_rate
 
 import utils.distributed as dist
+from pathlib import Path
 
 
 def reduce_tensor(inp):
@@ -91,63 +92,79 @@ def train(config, epoch, num_epoch, epoch_iters, base_lr,
 def validate(config, testloader, model, writer_dict):
     model.eval()
     ave_loss = AverageMeter()
-    nums = config.MODEL.NUM_OUTPUTS
-    confusion_matrix = np.zeros(
-        (config.DATASET.NUM_CLASSES, config.DATASET.NUM_CLASSES, nums))
+    ave_iou = AverageMeter()
+    # nums = config.MODEL.NUM_OUTPUTS
+    # confusion_matrix = np.zeros(
+    #     (config.DATASET.NUM_CLASSES, config.DATASET.NUM_CLASSES, nums))
     with torch.no_grad():
         for idx, batch in enumerate(testloader):
-            image, label, _, _ = batch
+            image, label, _, name = batch
             size = label.size()
             image = image.cuda()
             label = label.long().cuda()
 
             losses, pred = model(image, label)
-            if not isinstance(pred, (list, tuple)):
-                pred = [pred]
+            
+            ipred = []
             for i, x in enumerate(pred):
                 x = F.interpolate(
                     input=x, size=size[-2:],
                     mode='bilinear', align_corners=config.MODEL.ALIGN_CORNERS
                 )
+                ipred.append(x)
+            
+            # print(ipred[0])
+            # print(ipred[1])
+            
+            
+            # np.asarray(np.argmax(preds.cpu(), axis=1), dtype=np.uint8)
+            output = ipred[1].cpu().numpy().transpose(0, 2, 3, 1)
+            output[output<0.5] = 0.0
+            output[output>=0.5] = 1.0
+            
+            
+            seg_pred = np.asarray(np.argmax(output, axis=3), dtype=np.uint8)
+            seg_gt = np.asarray(label.cpu().numpy()[:, :size[-2], :size[-1]], dtype=np.int)
+            # print(seg_pred.shape, seg_gt.shape)
+            
 
-                confusion_matrix[..., i] += get_confusion_matrix(
-                    label,
-                    x,
-                    size,
-                    config.DATASET.NUM_CLASSES,
-                    config.TRAIN.IGNORE_LABEL
-                )
+            eps = 1e-12
+            iou = (sum(seg_pred*seg_gt))/((sum(seg_pred+seg_gt)-sum(seg_pred*seg_gt)+eps))
+            ave_iou.update(iou.mean())
 
-            if idx % 10 == 0:
-                print(idx)
 
             loss = losses.mean()
             if dist.is_distributed():
                 reduced_loss = reduce_tensor(loss)
             else:
                 reduced_loss = loss
+            
             ave_loss.update(reduced_loss.item())
+            
+            testloader.dataset.save_pred(seg_pred, Path(writer_dict['writer'].logdir).parent, name)
 
     if dist.is_distributed():
         confusion_matrix = torch.from_numpy(confusion_matrix).cuda()
         reduced_confusion_matrix = reduce_tensor(confusion_matrix)
         confusion_matrix = reduced_confusion_matrix.cpu().numpy()
 
-    for i in range(nums):
-        pos = confusion_matrix[..., i].sum(1)
-        res = confusion_matrix[..., i].sum(0)
-        tp = np.diag(confusion_matrix[..., i])
-        IoU_array = (tp / np.maximum(1.0, pos + res - tp))
-        mean_IoU = IoU_array.mean()
-        if dist.get_rank() <= 0:
-            logging.info('{} {} {}'.format(i, IoU_array, mean_IoU))
-
+    # for i in range(nums):
+    #     pos = confusion_matrix[..., i].sum(1)
+    #     res = confusion_matrix[..., i].sum(0)
+    #     tp = np.diag(confusion_matrix[..., i])
+    #     IoU_array = (tp / np.maximum(1.0, pos + res - tp))
+    #     mean_IoU = IoU_array.mean()
+    #     if dist.get_rank() <= 0:
+    #         logging.info('{} {} {}'.format(i, IoU_array, mean_IoU))
+    
+    mean_IoU = ave_iou.average()
+    print(mean_IoU)
     writer = writer_dict['writer']
     global_steps = writer_dict['valid_global_steps']
     writer.add_scalar('valid_loss', ave_loss.average(), global_steps)
     writer.add_scalar('valid_mIoU', mean_IoU, global_steps)
     writer_dict['valid_global_steps'] = global_steps + 1
-    return ave_loss.average(), mean_IoU, IoU_array
+    return ave_loss.average(), mean_IoU, _
 
 
 def testval(config, test_dataset, testloader, model,

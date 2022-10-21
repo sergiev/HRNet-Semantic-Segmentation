@@ -87,8 +87,10 @@ def main():
     cudnn.enabled = config.CUDNN.ENABLED
     gpus = list(config.GPUS)
     distributed = args.local_rank >= 0
+    
+    logger.info(f"Distributed: {distributed}, {args.local_rank}")
     if distributed:
-        device = torch.device('cuda:{}'.format(args.local_rank))    
+        device = torch.device(f'cuda:{args.local_rank}')    
         torch.cuda.set_device(device)
         torch.distributed.init_process_group(
             backend="nccl", init_method="env://",
@@ -305,7 +307,7 @@ def main():
             msg = 'Loss: {:.3f}, MeanIU: {: 4.4f}, Best_mIoU: {: 4.4f}'.format(
                         valid_loss, mean_IoU, best_mIoU)
             logging.info(msg)
-            logging.info(IoU_array)
+            # logging.info(IoU_array)
 
     if args.local_rank <= 0:
 

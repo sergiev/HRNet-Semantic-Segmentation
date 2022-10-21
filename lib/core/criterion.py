@@ -12,12 +12,12 @@ from config import config
 
 
 class CrossEntropy(nn.Module):
-    def __init__(self, ignore_label=-1, weight=None):
+    def __init__(self, ignore_label=0, weight=None):
         super(CrossEntropy, self).__init__()
         self.ignore_label = ignore_label
         self.criterion = nn.CrossEntropyLoss(
             weight=weight,
-            ignore_index=ignore_label
+            # ignore_index=ignore_label
         )
 
     def _forward(self, score, target):
@@ -33,17 +33,21 @@ class CrossEntropy(nn.Module):
 
     def forward(self, score, target):
 
-        if config.MODEL.NUM_OUTPUTS == 1:
-            score = [score]
+        # if config.MODEL.NUM_OUTPUTS == 1:
+        #     print(score)
+        #     print(len(score))
+        #     score = torch.FloatTensor([score]).cuda()
 
-        weights = config.LOSS.BALANCE_WEIGHTS
-        assert len(weights) == len(score)
+        # weights = config.LOSS.BALANCE_WEIGHTS
+        # print(weights)
+        # print(len(score))
+        # assert len(weights) == len(score)
 
-        return sum([w * self._forward(x, target) for (w, x) in zip(weights, score)])
+        return sum([self._forward(x, target) for x in score])
 
 
 class OhemCrossEntropy(nn.Module):
-    def __init__(self, ignore_label=-1, thres=0.7,
+    def __init__(self, ignore_label=0, thres=0.7,
                  min_kept=100000, weight=None):
         super(OhemCrossEntropy, self).__init__()
         self.thresh = thres
@@ -51,7 +55,7 @@ class OhemCrossEntropy(nn.Module):
         self.ignore_label = ignore_label
         self.criterion = nn.CrossEntropyLoss(
             weight=weight,
-            ignore_index=ignore_label,
+            # ignore_index=ignore_label,
             reduction='none'
         )
 
@@ -89,15 +93,17 @@ class OhemCrossEntropy(nn.Module):
 
     def forward(self, score, target):
 
-        if config.MODEL.NUM_OUTPUTS == 1:
-            score = [score]
+        # if config.MODEL.NUM_OUTPUTS == 1:
+        #     score = [score]
+        
 
-        weights = config.LOSS.BALANCE_WEIGHTS
-        assert len(weights) == len(score)
+        # weights = config.LOSS.BALANCE_WEIGHTS
+        # score = score[1]
+        
+        # assert len(weights) == len(score)
 
-        functions = [self._ce_forward] * \
-            (len(weights) - 1) + [self._ohem_forward]
+        functions = [self._ce_forward] * (len(score) - 1) + [self._ohem_forward]
         return sum([
-            w * func(x, target)
-            for (w, x, func) in zip(weights, score, functions)
+            func(x, target)
+            for (x, func) in zip(score, functions)
         ])

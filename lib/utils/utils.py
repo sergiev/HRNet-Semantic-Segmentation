@@ -19,21 +19,21 @@ import torch
 import torch.nn as nn
 
 class FullModel(nn.Module):
-  """
-  Distribute the loss on multi-gpu to reduce 
-  the memory cost in the main gpu.
-  You can check the following discussion.
-  https://discuss.pytorch.org/t/dataparallel-imbalanced-memory-usage/22551/21
-  """
-  def __init__(self, model, loss):
-    super(FullModel, self).__init__()
-    self.model = model
-    self.loss = loss
+    """
+    Distribute the loss on multi-gpu to reduce 
+    the memory cost in the main gpu.
+    You can check the following discussion.
+    https://discuss.pytorch.org/t/dataparallel-imbalanced-memory-usage/22551/21
+    """
+    def __init__(self, model, loss):
+        super(FullModel, self).__init__()
+        self.model = model
+        self.loss = loss
 
-  def forward(self, inputs, labels, *args, **kwargs):
-    outputs = self.model(inputs, *args, **kwargs)
-    loss = self.loss(outputs, labels)
-    return torch.unsqueeze(loss,0), outputs
+    def forward(self, inputs, labels, *args, **kwargs):
+        outputs = self.model(inputs, *args, **kwargs)
+        loss = self.loss(outputs, labels)
+        return torch.unsqueeze(loss,0), outputs
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
