@@ -141,7 +141,7 @@ def validate(config, testloader, model, writer_dict):
             
             ave_loss.update(reduced_loss.item())
             
-            testloader.dataset.save_pred(seg_pred, Path(writer_dict['writer'].logdir).parent, name)
+            testloader.dataset.save_pred(seg_pred, Path(writer_dict['writer'].logdir), name)
 
     if dist.is_distributed():
         confusion_matrix = torch.from_numpy(confusion_matrix).cuda()

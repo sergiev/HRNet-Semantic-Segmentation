@@ -9,3 +9,4 @@ scripts/
 detail-api/
 data/list
 .ipynb_checkpoints
+*.pth*
