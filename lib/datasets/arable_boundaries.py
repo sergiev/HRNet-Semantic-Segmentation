@@ -56,7 +56,7 @@ class ArableBoundaries(BaseDataset):
         self.class_weights =  torch.FloatTensor([0.15, 1.0]).cuda() # None #torch.FloatTensor([1.0]) #None # torch.FloatTensor([0.4, 1.0])#.cuda()
     
     def input_transform(self, image):
-        image = image.astype(np.float32)[:, :, ::-1]
+        image = image.astype(np.float32)[:, :, -2::-1]
         image = image / 10000.0
         # image -= self.mean
         # image /= self.std
@@ -65,7 +65,6 @@ class ArableBoundaries(BaseDataset):
     def gen_sample(self, image, label, multi_scale=True, is_flip=True):
         if multi_scale:
             rand_scale = 0.5 + random.randint(0, self.scale_factor) / 10.0
-            rand_scale *= 2 # sergiev: experimental#4
             image, label = self.multi_scale_aug(image, label,
                                                 rand_scale=rand_scale)
 
