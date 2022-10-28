@@ -231,23 +231,32 @@ def test(config, test_dataset, testloader, model,
     model.eval()
     with torch.no_grad():
         for _, batch in enumerate(tqdm(testloader)):
-            image, size, name = batch
-            size = size[0]
-            pred = test_dataset.multi_scale_inference(
-                config,
-                model,
-                image,
-                scales=config.TEST.SCALE_LIST,
-                flip=config.TEST.FLIP_TEST)
-
-            if pred.size()[-2] != size[0] or pred.size()[-1] != size[1]:
-                pred = F.interpolate(
-                    pred, size[-2:],
-                    mode='bilinear', align_corners=config.MODEL.ALIGN_CORNERS
-                )
+            if len(batch) == 3:
+                image, size, name = batch
+                size = size[0].numpy()[::-1]
+            elif len(batch) == 4:
+                image, label, size, name = batch
+                size = label.size()
+            size = tuple(size)
+            image = image.cuda()
+            pred = model(image)
+            
+            ipred = []
+            for x in pred:
+                x = F.interpolate(
+                    input=x, size=size[-2:],
+                    mode='bilinear', align_corners=config.MODEL.ALIGN_CORNERS)
+                ipred.append(x)
+        
+            output = ipred[1].cpu().numpy().transpose(0, 2, 3, 1)
+            output[output<0.5] = 0
+            output[output>=0.5] = 1
+            
+            
+            seg_pred = np.asarray(np.argmax(output, axis=3), dtype=np.uint8)
 
             if sv_pred:
                 sv_path = os.path.join(sv_dir, 'test_results')
                 if not os.path.exists(sv_path):
                     os.mkdir(sv_path)
-                test_dataset.save_pred(pred, sv_path, name)
+                test_dataset.save_pred(seg_pred*255, sv_path, name)

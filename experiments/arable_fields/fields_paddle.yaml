@@ -9,15 +9,15 @@ WORKERS: 16
 PRINT_FREQ: 10
 
 DATASET:
-  DATASET: arable_boundaries
+  DATASET: arable_fields
   ROOT: 'data/'
-  TEST_SET: 'list/arable_boundaries/test/L1C_T39UVB_A037498_20220827T080236.lst'
-  TRAIN_SET: 'list/arable_boundaries/train.lst'
+  TEST_SET: 'list/arable_fields/test/L1C_T39UVB_A037498_20220827T080236.lst'
+  TRAIN_SET: 'list/arable_fields/train.lst'
   NUM_CLASSES: 2
 MODEL:
   NAME: seg_hrnet_ocr
   NUM_OUTPUTS: 1
-  PRETRAINED: '/home/ailab/HRNet-Semantic-Segmentation/HRNet_W48_C_ssld_pretrained.pth'
+  PRETRAINED: '/home/ailab/HRNet-Semantic-Segmentation/output/arable_boundaries/baseline_paddle/best.pth'
   EXTRA:
     FINAL_CONV_KERNEL: 1
     STAGE1:

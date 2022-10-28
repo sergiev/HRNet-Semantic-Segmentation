@@ -19,7 +19,7 @@ from .base_dataset import BaseDataset
 from tifffile import tifffile
 
 
-class ArableBoundaries(BaseDataset):
+class ArableFields(BaseDataset):
     def __init__(self, 
                  root, 
                  list_path, 
@@ -35,7 +35,7 @@ class ArableBoundaries(BaseDataset):
                  mean=[0.485, 0.456, 0.406], 
                  std=[0.229, 0.224, 0.225]):
 
-        super(ArableBoundaries, self).__init__(ignore_label, base_size,
+        super(ArableFields, self).__init__(ignore_label, base_size,
                 crop_size, downsample_rate, scale_factor, mean, std,)
 
         self.root = root
@@ -131,7 +131,7 @@ class ArableBoundaries(BaseDataset):
         # image = cv2.imread(os.path.join(self.root, item["img"]),
         #                    cv2.IMREAD_COLOR)
         
-        image = tifffile.imread(os.path.join(self.root,'arable_boundaries',item["img"]))
+        image = tifffile.imread(os.path.join(self.root,'arable_fields',item["img"]))
         
         size = image.shape
 
@@ -144,7 +144,7 @@ class ArableBoundaries(BaseDataset):
         # label = cv2.imread(os.path.join(self.root,'cityscapes',item["label"]),
         #                    cv2.IMREAD_GRAYSCALE)
         if 'label' in item:
-            label = tifffile.imread(os.path.join(self.root, 'arable_boundaries', item["label"]))
+            label = tifffile.imread(os.path.join(self.root, 'arable_fields', item["label"]))
             label = self.convert_label(label)
 
             image, label = self.gen_sample(image, label, 
