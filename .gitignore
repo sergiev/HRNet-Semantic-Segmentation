@@ -10,3 +10,7 @@ detail-api/
 data/list
 .ipynb_checkpoints
 *.pth*
+*.png
+*.tif*
+*.jp2
+*.log

@@ -17,7 +17,7 @@ DATASET:
 MODEL:
   NAME: seg_hrnet_ocr
   NUM_OUTPUTS: 1
-  PRETRAINED: '/home/ailab/HRNet-Semantic-Segmentation/output/arable_boundaries/baseline_paddle/best.pth'
+  PRETRAINED: 'output/arable_boundaries/baseline_paddle/best.pth'
   EXTRA:
     FINAL_CONV_KERNEL: 1
     STAGE1:

@@ -7,17 +7,8 @@ import rasterio as rio
 from typing import List
 from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm 
-import matplotlib.pyplot as plt
 import cv2
-# ------------------------------------------------------------------------------
-# Copyright (c) Microsoft
-# Licensed under the MIT License.
-# Written by Ke Sun (sunk@mail.ustc.edu.cn)
-# ------------------------------------------------------------------------------
-
-import argparse
-import os
-from pathlib import Path
+import tifffile as tf
 
 
 import torch.nn as nn
@@ -29,47 +20,7 @@ import models
 import datasets
 from config import config
 from config import update_config
-
-def parse_args(args):
-    update_config(config, args)
-
-    return args
-
-def load_model(cfg_path, weights_path, img_size):
-    args = argparse.Namespace(cfg=cfg_path, 
-        opts=['TEST.MODEL_FILE', weights_path, 
-            'TEST.IMAGE_SIZE', (img_size, img_size), 
-            'TEST.BASE_SIZE', img_size])
-    args = parse_args(args)
-
-    # cudnn related setting
-    cudnn.benchmark = config.CUDNN.BENCHMARK
-    cudnn.deterministic = config.CUDNN.DETERMINISTIC
-    cudnn.enabled = config.CUDNN.ENABLED
-
-    # build model
-    if torch.__version__.startswith('1'):
-        module = eval('models.'+config.MODEL.NAME)
-        module.BatchNorm2d_class = module.BatchNorm2d = torch.nn.BatchNorm2d
-    model = eval('models.'+config.MODEL.NAME +
-                 '.get_seg_model')(config)
-    model_state_file = config.TEST.MODEL_FILE  
-
-    print('=> loading model from {}'.format(model_state_file))
-        
-    pretrained_dict = torch.load(model_state_file)
-    if 'state_dict' in pretrained_dict:
-        pretrained_dict = pretrained_dict['state_dict']
-    model_dict = model.state_dict()
-    pretrained_dict = {k[6:]: v for k, v in pretrained_dict.items()
-                        if k[6:] in model_dict.keys()}
-    model_dict.update(pretrained_dict)
-    model.load_state_dict(model_dict)
-
-    gpus = list(config.GPUS)
-    model = nn.DataParallel(model, device_ids=gpus).cuda()
-    
-    return model
+from model_io import load_model
 
 def inference(model, image, tile_size):
     with torch.no_grad():
@@ -90,10 +41,6 @@ def inference(model, image, tile_size):
         seg_pred = np.asarray(np.argmax(output, axis=3), dtype=np.uint8)
     return seg_pred
 
-
-def tensor2array(tensor):
-    return tensor.detach().cpu().numpy()
-
 def parse_dir(folder, channels, extensions):
     return [list(folder.rglob(f"{ch}{ext}"))[0] for ext in extensions for ch in channels]
 
@@ -103,29 +50,54 @@ def read_band_file(file_path) -> np.array:
 
 
 def read_bands_from_folder(folder, channels, extensions: List) -> np.array:
-    files = parse_dir(folder, channels, extensions)
-
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        results = executor.map(read_band_file, files)
-
+    # N-channel image from separate channel files
+    band_files = parse_dir(folder, channels, extensions)
+    results = []
+    for channel, file in zip(channels, band_files):
+        ds = rio.open(file)
+        result = ds.read(1)
+        results.append(result)
+        # meta = ds.meta
+        # new_metadata = meta.copy()
+        # new_metadata.update(
+        #     width=512,
+        #     height=512
+        # )
+        # out_path = folder / f'{channel}_512.tif'
+        # result_512 = result[:512,:512]
+        # # with rio.open(out_path, 'w', **new_metadata) as file:
+        # #     file.write(result_512, 1)
+        
     combined = np.dstack(results)
     return combined
 
-# create combined masks
+def imitate_train_bias(img):
+    # optimized version of bias imitation
+    # debiased = (img - np.average(img)) / np.std(img)
+    # return debiased * TRAIN_STD + TRAIN_AVG
+    TRAIN_AVG = 0.18669257
+    TRAIN_STD = 0.022204865
+    coeff = TRAIN_STD / np.std(img)
+    return coeff * (img - np.average(img)) + TRAIN_AVG 
 
 # set up constants
-CHANNELS = ['RED', 'GRN', 'BLU', 'NIR']
+CHANNELS = ['BLU', 'GRN', 'RED']
 EXT = ['.jp2']
 if __name__=='__main__':
     tile_size = 4096
     tile_step = tile_size
 
-    data_path = Path("/home/qazybek/data/processed/test/FolderCreator/x_steps_config/L1C_T37UDT_A036526_20220620T084448")
-    # data_path = Path("/home/qazybek/data/processed/test/FolderCreator/x_steps_config/L1C_T39UVB_A037498_20220827T080236")
+    data_path = Path("test_geo/L1C_T37UDT_A036526_20220620T084448")
+    # data_path = Path("/mnt/localssd/semyon/tif_test_15112022")
 
     device = torch.device("cuda:0")
     # read an image as a numpy array
     large_img = read_bands_from_folder(data_path, CHANNELS, EXT)
+    large_img[large_img==-9999]=0
+    large_img = large_img.astype(np.float32)
+    if np.max(large_img) > 10000:
+        large_img /= 10000
+    
 
     # create image slicer
     tiler = ImageSlicer(large_img.shape, tile_size=tile_size, tile_step=tile_step)
@@ -133,6 +105,8 @@ if __name__=='__main__':
     crops = tiler.crops
     # create tile merger with channels=1(as it's a binary segmentation)
     merger = TileMerger(tiler.target_shape, 1, tiler.weight)
+    # get all tiles from a large raster
+    tiles = tiler.split(large_img)
 
     # list to store predictions
     results = []
@@ -144,18 +118,15 @@ if __name__=='__main__':
     bound_weights = 'output/arable_boundaries/baseline_paddle/best.pth'
     field_weights = 'output/arable_fields/fields_paddle/best.pth'
 
-    model_bound = load_model(bound_cfg, bound_weights, tile_size)  # model for segmenting boundaries
-    model_field = load_model(field_cfg, field_weights, tile_size)  # model for segmenting fields
+    model_bound = load_model(bound_cfg, bound_weights)  # model for segmenting boundaries
+    model_field = load_model(field_cfg, field_weights)  # model for segmenting fields
 
+    model_bound.cuda()
     model_bound.eval()
+    model_field.cuda()
     model_field.eval()
-
     with torch.no_grad():
-        # get all tiles from a large raster
-        tiles = [tile.astype(np.int32)[:, :, -2::-1] / 10000.0 for tile in tiler.split(large_img)]
-
         for j, tile in enumerate(tqdm(tiles)):
-            
             # pass the batch through models
             img = torch.tensor(tile).to(device).unsqueeze(0)
             img = torch.moveaxis(img, -1, 1).float()
@@ -168,8 +139,9 @@ if __name__=='__main__':
                     res_bound = res_bound[0]
 
             # apply erosion(making thinner)
-            kernel = np.ones((2, 2), np.uint8)
-            res_bound = cv2.erode(res_bound, kernel, iterations=1) 
+            # kernel = np.ones((2, 2), np.uint8)
+            # res_bound = cv2.erode(res_bound, kernel, iterations=1) 
+            
             # apply xor
             xor = res_field ^ res_bound
             # apply bitwise and
@@ -177,7 +149,6 @@ if __name__=='__main__':
             # store the result
             results.append(final)
 
-            
     # add all predictions to the merger
     merger.integrate_batch(torch.tensor(results), crops)
     # merge slices
@@ -186,19 +157,28 @@ if __name__=='__main__':
     merged = np.moveaxis(merged.detach().cpu().numpy(), 0, -1)
     # crop the mask(as before division the padding is applied)
     final_pred = tiler.crop_to_orignal_size(merged).squeeze()
-    # get the metadata
-    meta = rio.open(data_path / "RED.jp2").meta
-    meta["count"] = 1
 
     # set up output path
-    out_path = Path(f"/home/ailab/HRNet-Semantic-Segmentation/output/arable_unite_{tile_size}/{data_path.name}/GT.tif")
+    out_path = Path(f"output/arable_unite/{data_path.name}_{tile_size}.tif")
     out_path.parent.mkdir(exist_ok=True, parents=True)
+
+    # get the metadata
+    # meta = rio.open(data_path / f"RED.{EXT[0]}").meta
+    # meta["count"] = 1
 
     # save the prediction raster
     # with rio.open(out_path, "w", **meta) as f:    
     #     f.write(final_pred, 1)
+    final_pred = final_pred.astype(np.uint8)
+
     print(np.unique(final_pred))
     cv2.imwrite(str(out_path), final_pred)
-    cv2.imwrite(str(out_path).replace('GT.', 'GT_255.'), (final_pred * 255).astype(np.uint8))
+    cv2.imwrite(str(out_path).replace('.tif', '_255.png'), final_pred * 255)
+
+    # cv2.imwrite('ci0_bands_source.tif', large_img[:tile_size, :tile_size, :3])
+    # cv2.imwrite('ci0_bands_source_255.png', (large_img[:tile_size, :tile_size, :3] * 0.0255).astype(np.uint8))
+    # cv2.imwrite('ci0_gt_binary.tif', final_pred[:tile_size, :tile_size])
+    # cv2.imwrite('ci0_gt_255.png', (final_pred[:tile_size, :tile_size] * 255).astype(np.uint8))
+
     # display it 
     # plt.imshow(rio.open(f"/home/ailab/HRNet-Semantic-Segmentation/output/arable_unite/{data_path.name}/GT.tif").read(1))
